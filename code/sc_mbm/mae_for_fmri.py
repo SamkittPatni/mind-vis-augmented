@@ -19,6 +19,7 @@ class PatchEmbed1D(nn.Module):
         self.proj = nn.Conv1d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x, **kwargs):
+        '''Transform input 1D fmri to patchified version.'''
         B, C, V = x.shape # batch, channel, voxels
         # assert V == self.num_voxels, \
         #     f"Input fmri length ({V}) doesn't match model ({self.num_voxels})."

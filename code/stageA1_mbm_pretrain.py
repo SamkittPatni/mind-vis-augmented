@@ -24,7 +24,7 @@ os.environ['WANDB_DIR'] = "."
 class wandb_logger:
     def __init__(self, config):
         wandb.init(
-                    project="mind-vis",
+                    project="mind-vis-augmented",
                     anonymous="allow",
                     group='stageA_sc-mbm',
                     config=config,

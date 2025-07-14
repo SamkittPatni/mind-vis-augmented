@@ -5,14 +5,15 @@ import os
 
 def get_1d_sincos_pos_embed(embed_dim, length, cls_token=False):
     """
+    This function generates a 1D sinusoidal position embedding for L tokens each of dimension embed_dim.
     grid_size: int of the grid height and width
     return:
     pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
     """
-    grid_l = np.arange(length, dtype=np.float32)
+    grid_l = np.arange(length, dtype=np.float32) # Build a 1D grid of positions [0, 1, ..., length-1]
 
     grid_l = grid_l.reshape([1, length])
-    pos_embed = get_1d_sincos_pos_embed_from_grid(embed_dim, grid_l)
+    pos_embed = get_1d_sincos_pos_embed_from_grid(embed_dim, grid_l) # Compute the sin-cos embeddings for the grid
     if cls_token:
         pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
     return pos_embed
@@ -69,12 +70,15 @@ def interpolate_pos_embed(model, checkpoint_model):
 
 
 def adjust_learning_rate(optimizer, epoch, config):
-    """Decay the learning rate with half-cycle cosine after warmup"""
+    """
+    This function adjusts the learning rate of the optimizer based on the current epoch.
+    The learning rate is scaled linearly during the warmup phase and then follows a cosine decay schedule for better and stable convergence.
+    """
     if epoch < config.warmup_epochs:
-        lr = config.lr * epoch / config.warmup_epochs 
+        lr = config.lr * epoch / config.warmup_epochs # Slowly bring lr from 0 to config.lr
     else:
         lr = config.min_lr + (config.lr - config.min_lr) * 0.5 * \
-            (1. + math.cos(math.pi * (epoch - config.warmup_epochs) / (config.num_epoch - config.warmup_epochs)))
+            (1. + math.cos(math.pi * (epoch - config.warmup_epochs) / (config.num_epoch - config.warmup_epochs))) # Moves lr down to min_lr
     for param_group in optimizer.param_groups:
         if "lr_scale" in param_group:
             param_group["lr"] = lr * param_group["lr_scale"]
@@ -102,6 +106,8 @@ def load_model(config, model, checkpoint_path ):
 
 def patchify(imgs, patch_size):
     """
+    Takes a batch of N images (each image is a 1D array of num_voxels) and converts them into L patches of size patch_size.
+    Essentially, it reshapes the breaks the 1D array into smaller segments.
     imgs: (N, 1, num_voxels)
     x: (N, L, patch_size)
     """
@@ -114,6 +120,8 @@ def patchify(imgs, patch_size):
 
 def unpatchify(x, patch_size):
     """
+    Takes a batch of N patchified images (each image has L patches of size patch_size) and converts them back into the original 1D array of num_voxels.
+    Essentially, it concatenates the patches back into a single 1D array.
     x: (N, L, patch_size)
     imgs: (N, 1, num_voxels)
     """

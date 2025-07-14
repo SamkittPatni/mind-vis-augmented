@@ -6,12 +6,16 @@ import numpy as np
 import time
 
 class NativeScalerWithGradNormCount:
+    # This class is used to scale the loss and gradients during training, especially for mixed precision training.
+    # It helps in preventing underflow and overflow issues by scaling the gradients appropriately.
     state_dict_key = "amp_scaler"
 
     def __init__(self):
+        '''Initialize the scaler for mixed precision training'''
         self._scaler = torch.cuda.amp.GradScaler()
 
     def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True):
+        '''Scales the loss, computes gradients, clips them if wanted, and updates the optimizer.'''
         self._scaler.scale(loss).backward(create_graph=create_graph)
         if update_grad:
             if clip_grad is not None:
@@ -31,10 +35,12 @@ class NativeScalerWithGradNormCount:
         return self._scaler.state_dict()
 
     def load_state_dict(self, state_dict):
+        '''Load the state of the scaler from a saved checkpoint.'''
         self._scaler.load_state_dict(state_dict)
 
 
 def get_grad_norm_(parameters, norm_type: float = 2.0):
+    '''Compute the norm of gradients for a list of parameters.'''
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     parameters = [p for p in parameters if p.grad is not None]

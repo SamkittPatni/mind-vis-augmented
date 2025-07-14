@@ -19,7 +19,7 @@ from eval_metrics import get_similarity_metric
 
 
 def wandb_init(config, output_path):
-    wandb.init( project='mind-vis',
+    wandb.init( project='mind-vis-augmented',
                 group="stageB_dc-ldm",
                 anonymous="allow",
                 config=config,
