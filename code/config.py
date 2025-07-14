@@ -6,6 +6,43 @@ class Config_MAE_fMRI: # back compatibility
 class Config_MBM_finetune: # back compatibility
     pass 
 
+class Config_LSTM_fMRI:
+    # configs for lstm pretrain
+    def __init__(self):
+    # --------------------------------------------
+    # LSTM for fMRI
+        # Loss Parameters
+        self.temperature = 0.07
+
+        # Training Parameters
+        self.lr = 2.5e-4
+        self.min_lr = 0.
+        self.weight_decay = 0.05
+        self.num_epoch = 500
+        self.warmup_epochs = 40
+        self.batch_size = 100
+        self.clip_grad = 0.8
+        
+        # Model Parameters
+        self.input_dim = 1
+        self.hidden_size = 1024
+        self.num_layers = 1
+        self.bidirectional = False
+
+        # Project setting
+        # self.root_path = '.'
+        # self.output_path = self.root_path
+        # self.seed = 2022
+        # self.roi = 'VC'
+        # self.aug_times = 1
+        # self.num_sub_limit = None
+        # self.include_hcp = True
+        # self.include_kam = True
+        # self.accum_iter = 1
+
+        # distributed training
+        self.local_rank = 1
+
 class Config_MBM_fMRI(Config_MAE_fMRI):
     # configs for fmri_pretrain.py
     def __init__(self):
