@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import os
 import math
 
-def symmetric_info_nce_loss(z: torch.Tensor, temperature=0.07) -> torch.Tensor:
+def symmetric_info_nce_loss(z: torch.Tensor, temperature=0.07, include_same_time = True) -> torch.Tensor:
     """
     Compute symmetric InfoNCE loss over adjacent time embeddings.
     z: (B, T, D)
@@ -12,12 +12,8 @@ def symmetric_info_nce_loss(z: torch.Tensor, temperature=0.07) -> torch.Tensor:
     N = B * T
     # Flatten
     z_flat = z.view(N, D)  # (N, D)
-
     # Cosine similarity matrix
-    sim = F.cosine_similarity(
-        z_flat.unsqueeze(1), z_flat.unsqueeze(0), dim=-1
-    ) / temperature  # (N, N)
-
+    sim = F.cosine_similarity(z_flat.unsqueeze(1), z_flat.unsqueeze(0), dim=-1) / temperature  # (N, N)
     # Exponential
     exp_sim = torch.exp(sim)
     # Build time index for each flat pos
@@ -42,7 +38,10 @@ def symmetric_info_nce_loss(z: torch.Tensor, temperature=0.07) -> torch.Tensor:
     positives = torch.tensor(positives, device=z.device)
     numer = exp_sim[anchors, positives] # Numerators: exp_sim[anchors, positives]
     # Build negative mask per anchor
-    neg_mask = ~(diag_mask | same_time) # valid_neg = ~diag_mask & ~same_time
+    if (include_same_time):
+        neg_mask = ~(diag_mask | same_time) # valid_neg = ~diag_mask & ~same_time
+    else:
+        neg_mask = ~diag_mask
     neg_mask[anchors, positives] = False # exclude the actual positive from the negatives
 
     denom = exp_sim[anchors.unsqueeze(1), torch.where(neg_mask[anchors])[1]].view(numer.size(0), -1).sum(dim=1)

@@ -21,7 +21,7 @@ class LSTMforFMRI(nn.Module):
         self.bidirectional = bidirectional
         self.embed_dim = hidden_size
 
-    def forward(self, x, lengths=None):
+    def forward(self, x, lengths=None, include_same_time=False):
         """
         Forward pass through the LSTM model.
         """
@@ -36,6 +36,6 @@ class LSTMforFMRI(nn.Module):
         else:
             lstm_out, _ = self.lstm(x)
         z = self.norm(lstm_out)  # Apply layer normalization
-        loss = ut.symmetric_info_nce_loss(z)  # Compute the loss
+        loss = ut.symmetric_info_nce_loss(z=z, include_same_time=include_same_time)  # Compute the loss
 
         return loss, z  # Return the loss and the output embeddings

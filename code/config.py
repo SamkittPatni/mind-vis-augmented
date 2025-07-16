@@ -30,18 +30,18 @@ class Config_LSTM_fMRI:
         self.bidirectional = False
 
         # Project setting
-        # self.root_path = '.'
-        # self.output_path = self.root_path
-        # self.seed = 2022
-        # self.roi = 'VC'
-        # self.aug_times = 1
-        # self.num_sub_limit = None
-        # self.include_hcp = True
-        # self.include_kam = True
-        # self.accum_iter = 1
+        self.root_path = '.'
+        self.output_path = self.root_path
+        self.seed = 2022
+        self.roi = 'VC'
+        self.aug_times = 1
+        self.num_sub_limit = None
+        self.include_hcp = True
+        self.include_kam = True
+        self.accum_iter = 1
 
         # distributed training
-        self.local_rank = 1
+        self.local_rank = 0
 
 class Config_MBM_fMRI(Config_MAE_fMRI):
     # configs for fmri_pretrain.py

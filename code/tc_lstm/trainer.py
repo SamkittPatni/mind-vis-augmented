@@ -59,7 +59,7 @@ def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
     return total_norm
 
 def train_one_epoch(model, data_loader, optimizer, device, epoch, 
-                        loss_scaler,log_writer=None, config=None, start_time=None):
+                        loss_scaler, include_same_time=False, log_writer=None, config=None, start_time=None):
     """
     Train model one epoch with mixed precision on temporal sym contrast loss.
     """
@@ -76,7 +76,7 @@ def train_one_epoch(model, data_loader, optimizer, device, epoch,
 
         x = x.to(device)
         with torch.cuda.amp.autocast(enabled=True):
-            loss, z = model(x, lengths)
+            loss, z = model(x, lengths, include_same_time=include_same_time)  # Forward pass through the model
 
         loss_value = loss.item()
         if not math.isfinite(loss_value):
