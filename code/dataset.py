@@ -13,10 +13,12 @@ import torchvision.transforms as transforms
 def identity(x):
     return x
 def pad_to_patch_size(x, patch_size):
+    '''Pad the input array to the nearest patch size to simplify patchifying.'''
     assert x.ndim == 2
     return np.pad(x, ((0,0),(0, patch_size-x.shape[1]%patch_size)), 'wrap')
 
 def pad_to_length(x, length):
+    '''Pad the input array to the specified length (useful when combining datasets with different lengths).'''
     assert x.ndim == 3
     assert x.shape[-1] <= length
     if x.shape[-1] == length:
@@ -25,6 +27,7 @@ def pad_to_length(x, length):
     return np.pad(x, ((0,0),(0,0), (0, length - x.shape[-1])), 'wrap')
 
 def normalize(x, mean=None, std=None):
+    ''' Normalize the input array to have zero mean and unit variance.'''
     mean = np.mean(x) if mean is None else mean
     std = np.std(x) if std is None else std
     return (x - mean) / (std * 1.0)
@@ -49,6 +52,7 @@ def process_voxel_ts(v, p, t=8):
 
 def augmentation(data, aug_times=2, interpolation_ratio=0.5):
     '''
+    Generates synthetic data by interpolating between random pairs of samples.
     data: num_samples, num_voxels_padded
     return: data_aug: num_samples*aug_times, num_voxels_padded
     '''
@@ -66,10 +70,10 @@ def augmentation(data, aug_times=2, interpolation_ratio=0.5):
 
 def interpolate_voxels(x, y, ratio=0.5):
     ''''
+    Take two 1D arrays and create a new array that is a linear interpolation between them based on the ratio.
     x, y: one dimension voxels array
     ratio: ratio for interpolation
     return: z same shape as x and y
-
     '''
     values = np.stack((x,y))
     points = (np.r_[0, 1], np.arange(len(x)))
@@ -89,6 +93,73 @@ def channel_first(img):
             return rearrange(img, 'h w c -> c h w')
         return img
 
+class LSTM_HCP_dataset(Dataset):
+    def __init__(self, path='../data/HCP/npz', roi='VC', normalize=True, window_size=None, 
+                 window_stride=None, num_sub_limit=None):
+        super(LSTM_HCP_dataset, self).__init__()
+
+        runs=[]
+        # For each subject, load the HCP data, choose the rois, normalize and append.
+        for c, sub in enumerate(os.listdir(path)):
+            if os.path.isfile(os.path.join(path,sub,'HCP_visual_voxel.npz')) == False:
+                continue 
+            if num_sub_limit is not None and c > num_sub_limit:
+                break
+            npz = dict(np.load(os.path.join(path,sub,'HCP_visual_voxel.npz')))
+            voxels = np.concatenate([npz['V1'],npz['V2'],npz['V3'],npz['V4']], axis=-1) if roi == 'VC' else npz[roi]
+            if normalize:
+                mu = voxels.mean(0, keepdims=True)
+                sd = voxels.std(0, keepdims=True) + 1e-6
+                voxels = (voxels - mu) / sd
+            runs.append(voxels)
+
+        # Split the data into windows based on the window size and stride.
+        self.data = []
+        for arr in runs:
+            T, V = arr.shape
+            if window_size is None:
+                self.data.append(arr)
+            else:
+                if T < window_size:
+                    continue
+                for start in range(0, T - window_size + 1, window_stride):
+                    self.data.append(arr[start:start + window_size])
+
+        self.roi = roi
+        self.normalize = normalize
+        self.window_size = window_size
+        self.window_stride = window_stride or window_size
+        self.num_voxels = self.data[0].shape[-1]
+        self.images = [None] * len(self.data)
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        arr = self.data[idx]           # np.ndarray (T, V)
+        T, V = arr.shape
+        x = torch.from_numpy(arr).float()   # (T, V)
+        sample = {'fmri': x,
+                  'length': T,
+                  'image': None}
+        return sample
+
+def lstm_collate_fn(batch):
+    """
+    Collate a list of dicts [{'fmri', 'length', 'image'}, …]
+    into a padded batch for the LSTM:
+      fmri: FloatTensor (B, T_max, V)
+      length: LongTensor (B,)
+      image: list of None
+    """
+    fmris = [b['fmri'] for b in batch]
+    lengths = torch.tensor([b['length'] for b in batch], dtype=torch.long)
+    # pad_sequence defaults to padding shorter ones with zeros
+    fmri_padded = torch.nn.utils.rnn.pad_sequence(fmris, batch_first=True)
+    return {'fmri': fmri_padded,   # (B, T_max, V)
+            'length': lengths,     # (B,)
+            'image': [b['image'] for b in batch]}
+
 class hcp_dataset(Dataset):
     def __init__(self, path='../data/HCP/npz', roi='VC', patch_size=16, transform=identity, aug_times=2, 
                 num_sub_limit=None, include_kam=False, include_hcp=True):
@@ -97,6 +168,7 @@ class hcp_dataset(Dataset):
         images = []
         
         if include_hcp:
+            # For each subject, load the HCP data, choose the rois, downsample and pad.
             for c, sub in enumerate(os.listdir(path)):
                 if os.path.isfile(os.path.join(path,sub,'HCP_visual_voxel.npz')) == False:
                     continue 
@@ -106,7 +178,8 @@ class hcp_dataset(Dataset):
                 voxels = np.concatenate([npz['V1'],npz['V2'],npz['V3'],npz['V4']], axis=-1) if roi == 'VC' else npz[roi] # 1200, num_voxels
                 voxels = process_voxel_ts(voxels, patch_size) # num_samples, num_voxels_padded
                 data.append(voxels)
-                
+            
+            # Combine all subjects' data into one big array
             data = augmentation(np.concatenate(data, axis=0), aug_times) # num_samples, num_voxels_padded
             data = np.expand_dims(data, axis=1) # num_samples, 1, num_voxels_padded
             images += [None] * len(data)

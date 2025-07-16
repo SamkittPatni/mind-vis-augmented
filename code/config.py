@@ -36,9 +36,8 @@ class Config_LSTM_fMRI:
         self.roi = 'VC'
         self.aug_times = 1
         self.num_sub_limit = None
-        self.include_hcp = True
-        self.include_kam = True
-        self.accum_iter = 1
+        self.window_size = 256 # 1000 time points
+        self.window_stride = 128 # 1000 time points
 
         # distributed training
         self.local_rank = 0
