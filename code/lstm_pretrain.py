@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 import copy
 
-from config import Config_LSTM_fMRI as Config
+from config import Config_LSTM_fMRI
 from dataset import LSTM_HCP_dataset, lstm_collate_fn
 from tc_lstm.lstm_for_fmri import LSTMforFMRI
 from tc_lstm.trainer import NativeScalerWithGradNormCount as NativeScaler
@@ -78,6 +78,7 @@ def get_args_parser():
     parser.add_argument('--num_sub_limit', type=int,  help='max subjects to include')
     parser.add_argument('--include_hcp', type=bool, help='include HCP data')
     parser.add_argument('--include_kam', type=bool, help='include KAM data')
+    parser.add_argument('--resume_from', type=str, default=None, help='path to resume from checkpoint')
 
     # Distributed training parameters
     parser.add_argument('--local_rank', type=int, default=0, help='local process rank')
@@ -133,6 +134,16 @@ def main(config):
     print(optimizer)
     loss_scaler = NativeScaler()
 
+    # Resume from checkpoint if specified
+    start_epoch = 0
+    if config.resume_from is not None and os.path.isfile(config.resume_from):
+        print(f"Resuming from checkpoint: {config.resume_from}")
+        ckpt = torch.load(config.resume_from, map_location=device)
+        model_without_ddp.load_state_dict(ckpt['model'])
+        optimizer.load_state_dict(ckpt['optimizer'])
+        loss_scaler.load_state_dict(ckpt['scaler'])
+        start_epoch = ckpt['epoch'] + 1
+
     # Logger setup
     if logger is not None:
         logger.watch_model(model,log='all', log_freq=1000)
@@ -141,7 +152,7 @@ def main(config):
     start_time = time.time()
     print("Start LSTM pre-training ...")
 
-    for epoch in range(config.num_epoch):
+    for epoch in range(start_epoch, config.num_epoch):
         if torch.cuda.device_count() > 1:
             sampler.set_epoch(epoch)
         
@@ -216,7 +227,7 @@ def plot_lstm_diagnostics(model, dataloader, device, epoch, logger):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('LSTM Pretrain', parents=[get_args_parser()])
     args = parser.parse_args()
-    config = Config()
+    config = Config_LSTM_fMRI()
     # override config attributes with CLI args
     for k, v in vars(args).items():
         if v is not None and hasattr(config, k):
