@@ -6,7 +6,8 @@ import argparse
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from torch.nn.parallel import DistributedDataParallel, DistributedSampler
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import DistributedSampler
 import torch.nn.functional as F
 import timm.optim.optim_factory as optim_factory
 import wandb
@@ -189,7 +190,7 @@ def plot_lstm_diagnostics(model, dataloader, device, epoch, logger):
     # grab one batch
     batch = next(iter(dataloader))
     x = batch['fmri'].to(device)       # (B, T, V)
-    lengths = batch['length'].to(device)
+    lengths = batch['length']
     # forward: we ignore the loss, only need embeddings
     _, z = model(x, lengths)
     # pick the first sequence: (T, D)
@@ -200,7 +201,7 @@ def plot_lstm_diagnostics(model, dataloader, device, epoch, logger):
     fig, ax = plt.subplots()
     ax.hist(norms, bins=50)
     ax.set_title(f'Epoch {epoch}: Embedding Norms')
-    logger.log({'lstm/embedding_norms': wandb.Image(fig)}, step=epoch)
+    logger.log('lstm/embedding_norms', wandb.Image(fig), step=epoch)
     plt.close(fig)
 
     # 2) Cosine-sim heatmap
@@ -209,7 +210,7 @@ def plot_lstm_diagnostics(model, dataloader, device, epoch, logger):
     im = ax.imshow(S, vmin=-1, vmax=1, cmap='RdBu_r')
     fig.colorbar(im, ax=ax)
     ax.set_title(f'Epoch {epoch}: Temporal Cosine Similarity')
-    logger.log({'lstm/sim_heatmap': wandb.Image(fig)}, step=epoch)
+    logger.log('lstm/sim_heatmap', wandb.Image(fig), step=epoch)
     plt.close(fig)
 
     # 3) 2D PCA trajectory
@@ -219,7 +220,7 @@ def plot_lstm_diagnostics(model, dataloader, device, epoch, logger):
     ax.plot(proj[:,0], proj[:,1], '-o', markersize=3)
     ax.set_title(f'Epoch {epoch}: Embedding Trajectory (PCA)')
     ax.set_xlabel('PC1'); ax.set_ylabel('PC2')
-    logger.log({'lstm/trajectory': wandb.Image(fig)}, step=epoch)
+    logger.log('lstm/trajectory', wandb.Image(fig), step=epoch)
     plt.close(fig)
 
     model.train()

@@ -69,11 +69,12 @@ def train_one_epoch(model, data_loader, optimizer, device, epoch,
     accum_iter = config.accum_iter
     start_time = time.time()
 
-    for data_iter_step, (x, lengths) in enumerate(data_loader):
+    for data_iter_step, (data) in enumerate(data_loader):
+        x = data['fmri']  # (B, T, V)
+        lengths = data['length']
         # per-iteration LR schedule
         if data_iter_step % accum_iter == 0:
             ut.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, config)
-
         x = x.to(device)
         with torch.cuda.amp.autocast(enabled=True):
             loss, z = model(x, lengths, include_same_time=include_same_time)  # Forward pass through the model

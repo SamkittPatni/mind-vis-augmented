@@ -28,8 +28,9 @@ class LSTMforFMRI(nn.Module):
         # x: (B, T, D) [can be padded]
         # lengths: (B,) [optional, for packed sequences, contains the actual lengths of sequences]
         if lengths is not None:
+            lengths_cpu = lengths.detach().cpu()    # <-- ensure CPU, int64
             # If input is padded, pack the sequences and then pass into the model
-            packed = nn.utils.rnn.pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
+            packed = nn.utils.rnn.pack_padded_sequence(x, lengths_cpu, batch_first=True, enforce_sorted=False)
             out_packed, _ = self.lstm(packed)
             # Unpack the sequences to get the output
             lstm_out, _ = nn.utils.rnn.pad_packed_sequence(out_packed, batch_first=True)
