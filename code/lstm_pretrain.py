@@ -113,7 +113,7 @@ def main(config):
     np.random.seed(config.seed)
 
     # Dataset preparation
-    dataset_pretrain = LSTM_HCP_dataset(path=os.path.join(config.root_path, 'data/HCP/npz'), roi=config.roi, 
+    dataset_pretrain = LSTM_HCP_dataset(path=os.path.join(config.root_path, '/mnt/iusers01/fse-ugpgt01/compsci01/p86963sp/scratch/HCP_1200'), roi=config.roi, 
                                         normalize=True, window_size=config.window_size, window_stride=config.window_stride, 
                                         num_sub_limit=config.num_sub_limit)
     print(f'Dataset size: {len(dataset_pretrain)}\nNumber of voxels: {dataset_pretrain.num_voxels}')

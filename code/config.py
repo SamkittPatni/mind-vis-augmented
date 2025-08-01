@@ -18,8 +18,8 @@ class Config_LSTM_fMRI:
         self.lr = 2.5e-4
         self.min_lr = 0.
         self.weight_decay = 0.05
-        self.num_epoch = 100
-        self.warmup_epochs = 40
+        self.num_epoch = 50
+        self.warmup_epochs = 10
         self.batch_size = 32
         self.clip_grad = 0.8
         
@@ -36,8 +36,8 @@ class Config_LSTM_fMRI:
         self.roi = 'VC'
         self.aug_times = 1
         self.num_sub_limit = None
-        self.window_size = 64 # 1000 time points
-        self.window_stride = 64 # 1000 time points
+        self.window_size = 256 # 1000 time points
+        self.window_stride = 128 # 1000 time points
         self.accum_iter = 4
         self.resume_from = None
 
