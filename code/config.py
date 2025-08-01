@@ -123,6 +123,10 @@ class Config_Generative_Model:
         self.root_path = '.'
         self.kam_path = os.path.join(self.root_path, 'data/Kamitani/npz')
         self.bold5000_path = os.path.join(self.root_path, 'data/BOLD5000')
+        self.kam_train_ts_path = os.path.join(self.root_path, 'data/Kamitani/GOD_Train')
+        self.kam_test_ts_path = os.path.join(self.root_path, 'data/Kamitani/GOD_Test')
+        self.lstm_pretrain_path = os.path.join(self.root_path, 'mind-vis-augmented/results/lstm_pretrain/31-07-2025-09-16-34/checkpoints')
+        self.cross_attn_heads = 8
         self.roi = 'VC'
         self.patch_size = 16
 

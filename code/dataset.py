@@ -9,6 +9,7 @@ import csv
 import torch
 from pathlib import Path
 import torchvision.transforms as transforms
+from torch.utils.data._utils.collate import default_collate
 
 def identity(x):
     return x
@@ -92,6 +93,83 @@ def channel_first(img):
         if img.shape[-1] == 3:
             return rearrange(img, 'h w c -> c h w')
         return img
+
+class LSTM_GOD_Dataset(Dataset):
+    def __init__(self, root_path, roi='VC', normalize=True, window_size=3, window_stride=3, num_subjects=None):
+        super(LSTM_GOD_Dataset, self).__init__()
+        self.root = os.path.expanduser(root_path)
+        subjects = sorted(os.listdir(self.root))
+        if num_subjects:
+            subjects = subjects[:num_subjects]
+
+        self.data = []
+        for sub in subjects:
+            npz_path = os.path.join(self.root, sub, 'GOD_visual_voxel.npz')
+            npz = dict(np.load(npz_path))
+
+            if roi == 'VC':
+                arr = np.concatenate([npz['V1'], npz['V2'], npz['V3'], npz['V4']], axis=-1)
+            else:
+                arr = npz[roi]
+
+            if normalize:
+                mu = arr.mean(0, keepdims=True)
+                sd = arr.std(0, keepdims=True) + 1e-6
+                arr = (arr - mu) / sd
+
+            target_V = 3396  # target voxel length
+            V_curr = arr.shape[-1]
+            if V_curr > target_V:
+                arr = arr[:, :target_V]  # truncate if too long
+            elif V_curr < target_V:
+                pad_width = target_V - V_curr
+                arr = np.pad(arr, ((0, 0), (0, pad_width)), mode='constant', constant_values=0)  # pad if too short
+            
+            T, V = arr.shape
+            for start in range(0, T - window_size + 1, window_stride):
+                self.data.append(arr[start:start + window_size])
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        arr = self.data[idx]
+        x = torch.from_numpy(arr).float()  # (window_size, V)
+        return {'fmri': x, 
+                'length': x.size(0), 
+                'image': None}
+
+
+class Combined_GOD_Dataset(Dataset):
+    def __init__(self, static_ds, lstm_ds):
+        assert len(static_ds) == len(lstm_ds)
+        self.static = static_ds
+        self.lstm = lstm_ds
+
+    def __len__(self):
+        return len(self.static)
+    
+    def __getitem__(self, idx):
+        s = self.static[idx]
+        l = self.lstm[idx]
+        return {
+            'fmri': s['fmri'].squeeze(0),  # (V,)
+            'image': s['image'],  # image tensor
+            'fmri_ts': l['fmri'],  # (T, V)
+            'length': l['length'],  # length of the time series
+        }
+    
+def combined_collate_fn(batch):
+    static_batch = default_collate(
+        [{'fmri': b['fmri'], 'image': b['image']} for b in batch]
+    )
+    lstm_batch = lstm_collate_fn(
+        [{'fmri': b['fmri_ts'], 'length': b['length']} for b in batch]
+    )
+    
+    static_batch['fmri_ts'] = lstm_batch['fmri']
+    static_batch['length'] = lstm_batch['length']
+    return static_batch
 
 class LSTM_HCP_dataset(Dataset):
     def __init__(self, path='../data/HCP/npz', roi='VC', normalize=True, window_size=None, 

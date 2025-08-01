@@ -10,7 +10,10 @@ from einops import rearrange, repeat
 from torchvision.utils import make_grid
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
+import types
 from sc_mbm.mae_for_fmri import fmri_encoder
+from torch.utils.data import DataLoader
+from dataset import combined_collate_fn
 
 def create_model_from_config(config, num_voxels, global_pool):
     model = fmri_encoder(num_voxels=num_voxels, patch_size=config.patch_size, embed_dim=config.embed_dim,
@@ -45,9 +48,10 @@ class cond_stage_model(nn.Module):
 
 class fLDM:
 
-    def __init__(self, metafile, num_voxels, device=torch.device('cpu'),
+    def __init__(self, metafile, num_voxels, lstm_model, device=torch.device('cpu'),
                  pretrain_root='../pretrains/ldm/label2img',
                  logger=None, ddim_steps=250, global_pool=True, use_time_cond=True):
+        self.lstm = lstm_model
         self.ckp_path = os.path.join(pretrain_root, 'model.ckpt')
         self.config_path = os.path.join(pretrain_root, 'config.yaml') 
         config = OmegaConf.load(self.config_path)
@@ -56,12 +60,73 @@ class fLDM:
 
         self.cond_dim = config.model.params.unet_config.params.context_dim
 
+        self.cross_attn = nn.MultiheadAttention(embed_dim=self.cond_dim, num_heads=config.cross_attn_heads, batch_first=True)
+
         model = instantiate_from_config(config.model)
         pl_sd = torch.load(self.ckp_path, map_location="cpu")['state_dict']
        
         m, u = model.load_state_dict(pl_sd, strict=False)
         model.cond_stage_trainable = True
         model.cond_stage_model = cond_stage_model(metafile, num_voxels, self.cond_dim, global_pool=global_pool)
+
+        self.model.train_loader_kwargs = dict(
+            batch_size    = config.batch_size,
+            shuffle       = True,
+            num_workers   = config.num_workers,
+            collate_fn    = combined_collate_fn
+        )
+        self.model.val_loader_kwargs = dict(
+            batch_size    = config.batch_size,
+            shuffle       = False,
+            num_workers   = config.num_workers,
+            collate_fn    = combined_collate_fn
+        )
+
+        def train_dataloader(self):
+            return DataLoader(self.train_dataset, **self.train_loader_kwargs)
+
+        def val_dataloader(self):
+            return DataLoader(self.val_dataset,   **self.val_loader_kwargs)
+
+        # bind them onto the LightningModule
+        model.train_dataloader = types.MethodType(train_dataloader, model)
+        model.val_dataloader   = types.MethodType(val_dataloader,   model)
+
+        if self.lstm.hidden_size != self.cond_dim:
+            self.temporal_proj = nn.Linear(self.lstm.hidden_size, self.cond_dim).to(self.device)
+
+        _old_forward = model.cond_stage_model.forward
+        def fused_forward(fmri_static, fmri_ts, length=None):
+            """
+            fmri_static: (B, V)
+            fmri_ts: (B, T, V)
+            lengths: (B,)
+            """
+
+            static_emb = _old_forward(fmri_static)
+
+            _, z = self.lstm(fmri_ts, lengths=length)  # (B, T, embed_dim)
+            if hasattr(self, 'temporal_proj'):
+                z = self.temporal_proj(z)
+
+            enriched = self.cross_attn(query=static_emb.unsqueeze(1), key=z, value=z)  # (B, T, cond_dim)
+
+            return enriched.squeeze(1)
+        
+        model.cond_stage_model.forward = types.MethodType(fused_forward, model.cond_stage_model)
+
+        orig_ts = model.training_step
+        def _ts_with_stash(self, batch, batch_idx):
+            self._current_batch = batch
+            return orig_ts(batch, batch_idx)
+        model.training_step = types.MethodType(_ts_with_stash, model)
+
+        _old_get_cond = model.get_learned_conditioning
+        def _patched_get_cond(self, fmap):
+            b = self._current_batch
+            return self.cond_stage_model.forward(fmap, b['fmri_ts'], length=b['length'])
+        model.get_learned_conditioning = types.MethodType(_patched_get_cond, model)
+
 
         model.ddim_steps = ddim_steps
         model.re_init_ema()

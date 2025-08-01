@@ -14,6 +14,9 @@ import copy
 # own code
 from config import Config_Generative_Model
 from dataset import create_Kamitani_dataset, create_BOLD5000_dataset
+from dataset import LSTM_GOD_Dataset, Combined_GOD_Dataset, combined_collate_fn
+from tc_lstm.lstm_for_fmri import LSTMforFMRI
+from tc_lstm.utils import load_model
 from dc_ldm.ldm_for_fmri import fLDM
 from eval_metrics import get_similarity_metric
 
@@ -137,6 +140,15 @@ def main(config):
         fmri_latents_dataset_train, fmri_latents_dataset_test = create_Kamitani_dataset(config.kam_path, config.roi, config.patch_size, 
                 fmri_transform=fmri_transform, image_transform=[img_transform_train, img_transform_test], 
                 subjects=config.kam_subs)
+        
+        # Load LSTM time series data
+        ts_train = LSTM_GOD_Dataset(root_path=config.kam_train_ts_path, roi=config.roi, normalize=True, window_size=3, window_stride=3)
+        ts_test = LSTM_GOD_Dataset(root_path=config.kam_test_ts_path, roi=config.roi, normalize=True, window_size=3, window_stride=3)
+
+        # Combine static and time series data
+        train_ds = Combined_GOD_Dataset(fmri_latents_dataset_train, ts_train)
+        test_ds = Combined_GOD_Dataset(fmri_latents_dataset_test, ts_test)
+
         num_voxels = fmri_latents_dataset_train.num_voxels
     elif config.dataset == 'BOLD5000':
         fmri_latents_dataset_train, fmri_latents_dataset_test = create_BOLD5000_dataset(config.bold5000_path, config.patch_size, 
@@ -148,8 +160,14 @@ def main(config):
 
     # prepare pretrained mbm 
     pretrain_mbm_metafile = torch.load(config.pretrain_mbm_path, map_location='cpu')
+
+    # Load pretrained LSTM model
+    lstm_model = LSTMforFMRI(input_dim=3396, hidden_size=1024, num_layers=1, bidirectional=False)
+    load_model(config, lstm_model, config.lstm_pretrain_path)
+    lstm_model.eval()
+    for p in lstm_model.parameters(): p.requires_grad = False
     # create generateive model
-    generative_model = fLDM(pretrain_mbm_metafile, num_voxels,
+    generative_model = fLDM(pretrain_mbm_metafile, num_voxels, lstm_model=lstm_model,
                 device=device, pretrain_root=config.pretrain_gm_path, logger=config.logger, 
                 ddim_steps=config.ddim_steps, global_pool=config.global_pool, use_time_cond=config.use_time_cond)
     
@@ -160,7 +178,7 @@ def main(config):
         print('model resumed')
     # finetune the model
     trainer = create_trainer(config.num_epoch, config.precision, config.accumulate_grad, logger, check_val_every_n_epoch=5)
-    generative_model.finetune(trainer, fmri_latents_dataset_train, fmri_latents_dataset_test,
+    generative_model.finetune(trainer, train_ds, test_ds,
                 config.batch_size, config.lr, config.output_path, config=config)
 
     # generate images
