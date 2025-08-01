@@ -27,6 +27,8 @@ os.environ['WANDB_DIR'] = "."
 
 class wandb_logger:
     def __init__(self, config):
+        api_key = "WANDB_API_KEY"  # Replace with your actual WandB API key
+        wandb.login(key=api_key)
         wandb.init(
             project="mind-vis-augmented",
             anonymous="allow",
@@ -93,6 +95,7 @@ def create_readme(config, path):
 def main(config):
     # Set up distributed training if multiple GPUs are available
     if torch.cuda.device_count() > 1:
+        config.local_rank = int(os.environ.get('LOCAL_RANK', 0))
         torch.cuda.set_device(config.local_rank) 
         torch.distributed.init_process_group(backend='nccl')
 

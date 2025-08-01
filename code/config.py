@@ -38,7 +38,7 @@ class Config_LSTM_fMRI:
         self.num_sub_limit = None
         self.window_size = 64 # 1000 time points
         self.window_stride = 64 # 1000 time points
-        self.accum_iter = 1
+        self.accum_iter = 4
         self.resume_from = None
 
         # distributed training
