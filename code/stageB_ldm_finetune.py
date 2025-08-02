@@ -142,8 +142,8 @@ def main(config):
                 subjects=config.kam_subs)
         
         # Load LSTM time series data
-        ts_train = LSTM_GOD_Dataset(root_path=config.kam_train_ts_path, roi=config.roi, normalize=True, window_size=3, window_stride=3)
-        ts_test = LSTM_GOD_Dataset(root_path=config.kam_test_ts_path, roi=config.roi, normalize=True, window_size=3, window_stride=3)
+        ts_train = LSTM_GOD_Dataset(root_path=config.kam_train_ts_path, roi=config.roi, normalize=True, window_size=3, window_stride=3, subjects=config.kam_subs)
+        ts_test = LSTM_GOD_Dataset(root_path=config.kam_test_ts_path, roi=config.roi, normalize=True, window_size=3, window_stride=3, subjects=config.kam_subs)
 
         # Combine static and time series data
         train_ds = Combined_GOD_Dataset(fmri_latents_dataset_train, ts_train)

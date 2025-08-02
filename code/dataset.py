@@ -95,12 +95,15 @@ def channel_first(img):
         return img
 
 class LSTM_GOD_Dataset(Dataset):
-    def __init__(self, root_path, roi='VC', normalize=True, window_size=3, window_stride=3, num_subjects=None):
+    def __init__(self, root_path, roi='VC', normalize=True, window_size=3, window_stride=3, subjects=None):
         super(LSTM_GOD_Dataset, self).__init__()
         self.root = os.path.expanduser(root_path)
-        subjects = sorted(os.listdir(self.root))
-        if num_subjects:
-            subjects = subjects[:num_subjects]
+        # subjects = sorted(os.listdir(self.root))
+        # if num_subjects:
+        #     subjects = subjects[:num_subjects]
+        if subjects is None:
+            subjects = sorted(os.listdir(self.root))
+        self.subjects = subjects
 
         self.data = []
         for sub in subjects:

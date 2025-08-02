@@ -69,6 +69,9 @@ class fLDM:
         model.cond_stage_trainable = True
         model.cond_stage_model = cond_stage_model(metafile, num_voxels, self.cond_dim, global_pool=global_pool)
 
+        model.cond_stage_model.cross_attn = self.cross_attn
+        model.cond_stage_model.temporal_proj = getattr(self, 'temporal_proj', None)
+
         self.model.train_loader_kwargs = dict(
             batch_size    = config.batch_size,
             shuffle       = True,
