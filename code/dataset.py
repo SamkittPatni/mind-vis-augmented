@@ -120,7 +120,7 @@ class LSTM_GOD_Dataset(Dataset):
                 sd = arr.std(0, keepdims=True) + 1e-6
                 arr = (arr - mu) / sd
 
-            target_V = 3396  # target voxel length
+            target_V = 3394  # target voxel length
             V_curr = arr.shape[-1]
             if V_curr > target_V:
                 arr = arr[:, :target_V]  # truncate if too long
@@ -145,6 +145,7 @@ class LSTM_GOD_Dataset(Dataset):
 
 class Combined_GOD_Dataset(Dataset):
     def __init__(self, static_ds, lstm_ds):
+        print("Static:", len(static_ds), " Timeseries:", len(lstm_ds))
         assert len(static_ds) == len(lstm_ds)
         self.static = static_ds
         self.lstm = lstm_ds
@@ -156,7 +157,7 @@ class Combined_GOD_Dataset(Dataset):
         s = self.static[idx]
         l = self.lstm[idx]
         return {
-            'fmri': s['fmri'].squeeze(0),  # (V,)
+            'fmri': s['fmri'],  # (V,)
             'image': s['image'],  # image tensor
             'fmri_ts': l['fmri'],  # (T, V)
             'length': l['length'],  # length of the time series

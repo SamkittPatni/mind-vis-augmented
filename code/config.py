@@ -91,12 +91,12 @@ class Config_MBM_finetune(Config_MBM_finetune):
     def __init__(self):
         
         # Project setting
-        self.root_path = '.'
+        self.root_path = '/mnt/iusers01/fse-ugpgt01/compsci01/p86963sp'
         self.output_path = self.root_path
-        self.kam_path = os.path.join(self.root_path, 'data/Kamitani/npz')
-        self.bold5000_path = os.path.join(self.root_path, 'data/BOLD5000')
+        self.kam_path = os.path.join(self.root_path, 'mind-vis-augmented/data/Kamitani/npz')
+        self.bold5000_path = os.path.join(self.root_path, 'mind-vis-augmented/data/BOLD5000')
         self.dataset = 'GOD' # GOD  or BOLD5000
-        self.pretrain_mbm_path = os.path.join(self.root_path, f'pretrains/{self.dataset}/fmri_encoder.pth') 
+        self.pretrain_mbm_path = os.path.join(self.root_path, f'mind-vis-augmented/pretrains/{self.dataset}/fmri_encoder.pth') 
 
         self.include_nonavg_test = True
         self.kam_subs = ['sbj_3']
@@ -120,25 +120,25 @@ class Config_Generative_Model:
     def __init__(self):
         # project parameters
         self.seed = 2022
-        self.root_path = '.'
-        self.kam_path = os.path.join(self.root_path, 'data/Kamitani/npz')
-        self.bold5000_path = os.path.join(self.root_path, 'data/BOLD5000')
-        self.kam_train_ts_path = os.path.join(self.root_path, 'data/Kamitani/GOD_Train')
-        self.kam_test_ts_path = os.path.join(self.root_path, 'data/Kamitani/GOD_Test')
-        self.lstm_pretrain_path = os.path.join(self.root_path, 'mind-vis-augmented/results/lstm_pretrain/31-07-2025-09-16-34/checkpoints')
+        self.root_path = '/mnt/iusers01/fse-ugpgt01/compsci01/p86963sp'
+        self.kam_path = os.path.join(self.root_path, 'mind-vis-augmented/data/Kamitani/npz')
+        self.bold5000_path = os.path.join(self.root_path, 'mind-vis-augmented/data/BOLD5000')
+        self.kam_train_ts_path = os.path.join(self.root_path, 'scratch/GOD/GOD_Train')
+        self.kam_test_ts_path = os.path.join(self.root_path, 'scratch/GOD/GOD_Test')
+        self.lstm_pretrain_path = os.path.join(self.root_path, 'mind-vis-augmented/results/lstm_pretrain/31-07-2025-09-16-34/checkpoints/checkpoint.pth')
         self.cross_attn_heads = 8
         self.roi = 'VC'
         self.patch_size = 16
 
         # self.pretrain_gm_path = os.path.join(self.root_path, 'pretrains/ldm/semantic')
-        self.pretrain_gm_path = os.path.join(self.root_path, 'pretrains/ldm/label2img')
+        self.pretrain_gm_path = os.path.join(self.root_path, 'mind-vis-augmented/pretrains/ldm/label2img')
         # self.pretrain_gm_path = os.path.join(self.root_path, 'pretrains/ldm/text2img-large')
         # self.pretrain_gm_path = os.path.join(self.root_path, 'pretrains/ldm/layout2img')
         
         self.dataset = 'GOD' # GOD or BOLD5000
         self.kam_subs = ['sbj_3']
         self.bold5000_subs = ['CSI1']
-        self.pretrain_mbm_path = os.path.join(self.root_path, f'pretrains/{self.dataset}/fmri_encoder.pth') 
+        self.pretrain_mbm_path = os.path.join(self.root_path, f'mind-vis-augmented/pretrains/{self.dataset}/fmri_encoder.pth') 
 
         self.img_size = 256
 
@@ -161,5 +161,5 @@ class Config_Generative_Model:
         self.HW = None
         # resume check util
         self.model_meta = None
-        self.checkpoint_path = None # os.path.join(self.root_path, 'results/generation/25-08-2022-08:02:55/checkpoint.pth')
+        self.checkpoint_path = os.path.join(self.root_path, 'mind-vis-augmented/results/generation/30-08-2025-22-26-15/checkpoint.pth')
         

@@ -51,7 +51,8 @@ class fLDM:
     def __init__(self, metafile, num_voxels, lstm_model, device=torch.device('cpu'),
                  pretrain_root='../pretrains/ldm/label2img',
                  logger=None, ddim_steps=250, global_pool=True, use_time_cond=True):
-        self.lstm = lstm_model
+        self.device = device
+        self.lstm = lstm_model.to(self.device)
         self.ckp_path = os.path.join(pretrain_root, 'model.ckpt')
         self.config_path = os.path.join(pretrain_root, 'config.yaml') 
         config = OmegaConf.load(self.config_path)
@@ -60,7 +61,7 @@ class fLDM:
 
         self.cond_dim = config.model.params.unet_config.params.context_dim
 
-        self.cross_attn = nn.MultiheadAttention(embed_dim=self.cond_dim, num_heads=config.cross_attn_heads, batch_first=True)
+        self.cross_attn = nn.MultiheadAttention(embed_dim=self.cond_dim, num_heads=8, batch_first=True)
 
         model = instantiate_from_config(config.model)
         pl_sd = torch.load(self.ckp_path, map_location="cpu")['state_dict']
@@ -68,17 +69,18 @@ class fLDM:
         m, u = model.load_state_dict(pl_sd, strict=False)
         model.cond_stage_trainable = True
         model.cond_stage_model = cond_stage_model(metafile, num_voxels, self.cond_dim, global_pool=global_pool)
+        model.cond_stage_model = model.cond_stage_model.to(device)
 
-        model.cond_stage_model.cross_attn = self.cross_attn
-        model.cond_stage_model.temporal_proj = getattr(self, 'temporal_proj', None)
+        #model.cond_stage_model.cross_attn = self.cross_attn
+        #model.cond_stage_model.temporal_proj = getattr(self, 'temporal_proj', None)
 
-        self.model.train_loader_kwargs = dict(
+        model.train_loader_kwargs = dict(
             batch_size    = config.batch_size,
             shuffle       = True,
             num_workers   = config.num_workers,
             collate_fn    = combined_collate_fn
         )
-        self.model.val_loader_kwargs = dict(
+        model.val_loader_kwargs = dict(
             batch_size    = config.batch_size,
             shuffle       = False,
             num_workers   = config.num_workers,
@@ -96,23 +98,43 @@ class fLDM:
         model.val_dataloader   = types.MethodType(val_dataloader,   model)
 
         if self.lstm.hidden_size != self.cond_dim:
-            self.temporal_proj = nn.Linear(self.lstm.hidden_size, self.cond_dim).to(self.device)
-
+            self.temporal_proj = nn.Linear(self.lstm.hidden_size, self.cond_dim).to(device)
+            
+        model.cond_stage_model.lstm = self.lstm
+        model.cond_stage_model.lstm = model.cond_stage_model.lstm.to(model.device)
+        model.cond_stage_model.temporal_proj = self.temporal_proj
+        model.cond_stage_model.cross_attn = self.cross_attn
+        
         _old_forward = model.cond_stage_model.forward
-        def fused_forward(fmri_static, fmri_ts, length=None):
+        def fused_forward(self, fmri_static, fmri_ts, length=None):
             """
             fmri_static: (B, V)
             fmri_ts: (B, T, V)
             lengths: (B,)
             """
-
+            
+            device = next(self.parameters()).device
+            fmri_static = fmri_static.to(device)
             static_emb = _old_forward(fmri_static)
-
+            fmri_ts = fmri_ts.to(device)
+            self.lstm = self.lstm.to(device)
+            
+            if fmri_ts.dim() == 2:
+                fmri_ts = fmri_ts.unsqueeze(0)
+            
+            if not torch.is_tensor(length):
+                length = torch.tensor(length, device=device)
+            if length.dim() == 0:
+                length = length.unsqueeze(0)
             _, z = self.lstm(fmri_ts, lengths=length)  # (B, T, embed_dim)
             if hasattr(self, 'temporal_proj'):
                 z = self.temporal_proj(z)
-
-            enriched = self.cross_attn(query=static_emb.unsqueeze(1), key=z, value=z)  # (B, T, cond_dim)
+                
+            B = static_emb.size(0)
+            if z.size(0) == 1 and B > 1:
+                z = z.repeat(B, 1, 1)
+            
+            enriched, _ = self.cross_attn(query=static_emb, key=z, value=z)  # (B, T, cond_dim)
 
             return enriched.squeeze(1)
         
@@ -139,6 +161,34 @@ class fLDM:
         model.p_channels = config.model.params.channels
         model.p_image_size = config.model.params.image_size
         model.ch_mult = config.model.params.first_stage_config.params.ddconfig.ch_mult
+        
+        fLDM_self = self  
+        orig_ddpm_generate = model.generate
+        def patched_ddpm_generate(self, fmri_embedding, num_samples, ddim_steps,
+                                HW=None, limit=None, state=None):
+            # Delegate to fLDM.generate, which already sets self._current_batch
+            if isinstance(fmri_embedding, dict):
+                batch = fmri_embedding
+                items = []
+                for i in range(batch['fmri'].shape[0]):
+                    items.append({
+                        'fmri': batch['fmri'][i],
+                        'image': batch['image'][i],
+                        'fmri_ts': batch['fmri_ts'][i],
+                        'length': batch['length'][i]
+                    })
+                fmri_embedding = items
+            return fLDM_self.generate(fmri_embedding,
+                                    num_samples,
+                                    ddim_steps,
+                                    HW=HW,
+                                    limit=limit,
+                                    state=state)
+
+        # Bind it onto the LatentDiffusion instance
+        model.generate = types.MethodType(patched_ddpm_generate, model)
+        
+        model = model.to(self.device)
 
         self.device = device    
         self.model = model
@@ -185,6 +235,17 @@ class fLDM:
     @torch.no_grad()
     def generate(self, fmri_embedding, num_samples, ddim_steps, HW=None, limit=None, state=None):
         # fmri_embedding: n, seq_len, embed_dim
+        if isinstance(fmri_embedding, dict):
+                batch = fmri_embedding
+                items = []
+                for i in range(batch['fmri'].shape[0]):
+                    items.append({
+                        'fmri': batch['fmri'][i],
+                        'image': batch['image'][i],
+                        'fmri_ts': batch['fmri_ts'][i],
+                        'length': batch['length'][i]
+                    })
+                fmri_embedding = items
         all_samples = []
         if HW is None:
             shape = (self.ldm_config.model.params.channels, 
@@ -206,6 +267,10 @@ class fLDM:
                 if limit is not None:
                     if count >= limit:
                         break
+                model._current_batch = {
+                    'fmri_ts': item['fmri_ts'].to(self.device),
+                    'length': item['length'],
+                }
                 latent = item['fmri']
                 gt_image = rearrange(item['image'], 'h w c -> 1 c h w') # h w c
                 print(f"rendering {num_samples} examples in {ddim_steps} steps.")
@@ -222,7 +287,7 @@ class fLDM:
                 x_samples_ddim = torch.clamp((x_samples_ddim+1.0)/2.0, min=0.0, max=1.0)
                 gt_image = torch.clamp((gt_image+1.0)/2.0, min=0.0, max=1.0)
                 
-                all_samples.append(torch.cat([gt_image, x_samples_ddim.detach().cpu()], dim=0)) # put groundtruth at first
+                all_samples.append(torch.cat([gt_image.cpu(), x_samples_ddim.detach().cpu()], dim=0)) # put groundtruth at first
                 
         
         # display as grid
@@ -234,6 +299,7 @@ class fLDM:
         grid = 255. * rearrange(grid, 'c h w -> h w c').cpu().numpy()
         model = model.to('cpu')
         
-        return grid, (255. * torch.stack(all_samples, 0).cpu().numpy()).astype(np.uint8)
+        return grid, (255. * torch.stack(all_samples, 0).cpu().numpy()).astype(np.uint8), state
+
 
 

@@ -3,50 +3,62 @@ import torch.nn.functional as F
 import os
 import math
 
-def symmetric_info_nce_loss(z: torch.Tensor, temperature=0.07, include_same_time = True) -> torch.Tensor:
+import torch
+import torch.nn.functional as F
+
+def symmetric_info_nce_loss(
+    z: torch.Tensor,
+    temperature: float = 0.07,
+    include_same_time: bool = True
+) -> torch.Tensor:
     """
-    Compute symmetric InfoNCE loss over adjacent time embeddings.
+    Memory-efficient symmetric InfoNCE over adjacent time embeddings.
     z: (B, T, D)
     """
     B, T, D = z.shape
-    N = B * T
-    # Flatten
-    z_flat = z.view(N, D)  # (N, D)
-    # Cosine similarity matrix
-    sim = F.cosine_similarity(z_flat.unsqueeze(1), z_flat.unsqueeze(0), dim=-1) / temperature  # (N, N)
-    # Exponential
-    exp_sim = torch.exp(sim)
-    # Build time index for each flat pos
-    time_idx = torch.arange(T, device=z.device).unsqueeze(0).repeat(B, 1).view(-1)
-    # Mask self similarities
-    diag_mask = torch.eye(N, device=z.device).bool()
-    # Mask same-time negatives
-    same_time = time_idx.unsqueeze(1) == time_idx.unsqueeze(0)  # (N,N)
 
-    # Identify positive pairs: forward and backward adjacent
-    anchors = []
-    positives = []
-    for b in range(B):
-        base = b * T
-        for t in range(T - 1):
-            anchors.append(base + t)
-            positives.append(base + t + 1)
-            anchors.append(base + t + 1)
-            positives.append(base + t)
+    # normalize once
+    z_norm = F.normalize(z, p=2, dim=2)       # (B, T, D)
+    z_flat = z_norm.view(B * T, D)            # (B*T, D)
 
-    anchors = torch.tensor(anchors, device=z.device)
-    positives = torch.tensor(positives, device=z.device)
-    numer = exp_sim[anchors, positives] # Numerators: exp_sim[anchors, positives]
-    # Build negative mask per anchor
-    if (include_same_time):
-        neg_mask = ~(diag_mask | same_time) # valid_neg = ~diag_mask & ~same_time
-    else:
-        neg_mask = ~diag_mask
-    neg_mask[anchors, positives] = False # exclude the actual positive from the negatives
+    device = z.device
+    batch_offsets = torch.arange(B, device=device) * T
 
-    denom = exp_sim[anchors.unsqueeze(1), torch.where(neg_mask[anchors])[1]].view(numer.size(0), -1).sum(dim=1)
-    loss = -torch.log(numer / denom) # Loss per positive pair
-    return loss.mean()
+    total_loss = 0.0
+    total_pairs = 0
+
+    # for each adjacent pair (forward and backward)
+    for t in range(T - 1):
+        for i, j in ((t, t+1), (t+1, t)):
+            # anchors = z_norm[:, i] ? (B, D)
+            sim = torch.matmul(z_norm[:, i], z_flat.t()) / temperature   # (B, B*T)
+            exp_sim = sim.exp()                                          # (B, B*T)
+
+            # sum over all positions
+            sum_all = exp_sim.sum(dim=1)                                 # (B,)
+
+            # indices into the flattened sequence
+            self_idx = batch_offsets + i                                 # (B,)
+            pos_idx  = batch_offsets + j                                 # (B,)
+
+            pos_exp = exp_sim[torch.arange(B, device=device), pos_idx]   # (B,)
+
+            if include_same_time:
+                # exclude *all* embeddings at this same time i
+                # time_idx == self_idx is exactly the B positions at time=i
+                same_time_sum = exp_sim[:, self_idx].sum(dim=1)          # (B,)
+                denom = sum_all - same_time_sum - pos_exp
+            else:
+                # exclude only self
+                self_exp = exp_sim[torch.arange(B, device=device), self_idx]
+                denom = sum_all - self_exp - pos_exp
+
+            loss = -torch.log(pos_exp / denom)  # (B,)
+            total_loss += loss.sum()
+            total_pairs += B
+
+    return total_loss / total_pairs
+
 
 def adjust_learning_rate(optimizer, epoch, config):
     """

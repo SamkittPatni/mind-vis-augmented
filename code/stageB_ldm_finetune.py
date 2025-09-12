@@ -9,6 +9,9 @@ from einops import rearrange
 from PIL import Image
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
+import pytorch_lightning.utilities.distributed as _pl_dist
+from pytorch_lightning.plugins import DDPPlugin
+
 import copy
 
 # own code
@@ -20,8 +23,31 @@ from tc_lstm.utils import load_model
 from dc_ldm.ldm_for_fmri import fLDM
 from eval_metrics import get_similarity_metric
 
+_orig_sync_ddp = _pl_dist.sync_ddp
+
+def _sync_ddp_force_cuda(tensor, group=None, reduce_op="sum"):
+    """
+    Before any broadcast or all‐reduce, ensure we only ever hand
+    NCCL a dense CUDA tensor.
+    """
+    if isinstance(tensor, torch.Tensor):
+        # 1) Move CPU → current GPU
+        if not tensor.is_cuda:
+            tensor = tensor.cuda(torch.cuda.current_device())
+        # 2) If somehow sparse, make dense
+        if tensor.is_sparse:
+            tensor = tensor.to_dense()
+        # 3) Guarantee contiguous layout
+        if not tensor.is_contiguous():
+            tensor = tensor.contiguous()
+    return _orig_sync_ddp(tensor, group=group, reduce_op=reduce_op)
+
+# Override Lightning’s sync hook globally
+_pl_dist.sync_ddp = _sync_ddp_force_cuda
 
 def wandb_init(config, output_path):
+    api_key = "WANDB_API_KEY"  # replace with your actual API key or set as environment variable
+    wandb.login(key=api_key)
     wandb.init( project='mind-vis-augmented',
                 group="stageB_dc-ldm",
                 anonymous="allow",
@@ -57,7 +83,17 @@ def get_eval_metric(samples, avg=True):
             pred_images = rearrange(np.stack(pred_images), 'n c h w -> n h w c')
             res = get_similarity_metric(pred_images, gt_images, method='pair-wise', metric_name=m)
             res_part.append(np.mean(res))
-        res_list.append(np.mean(res_part))     
+        res_list.append(np.mean(res_part))
+           
+    res_part = []
+    for s in samples_to_run:
+        pred_images = [img[s] for img in samples]
+        pred_images = rearrange(np.stack(pred_images), 'n c h w -> n h w c')
+        res = get_similarity_metric(pred_images, gt_images, method='metrics-only', metric_name='fid')
+        res_part.append(np.mean(res))
+    res_list.append(np.mean(res_part))
+    metric_list.append('fid')
+        
     res_part = []
     for s in samples_to_run:
         pred_images = [img[s] for img in samples]
@@ -69,16 +105,43 @@ def get_eval_metric(samples, avg=True):
     res_list.append(np.max(res_part))
     metric_list.append('top-1-class')
     metric_list.append('top-1-class (max)')
+    res_part = []
+    for s in samples_to_run:
+        pred_images = [img[s] for img in samples]
+        pred_images = rearrange(np.stack(pred_images), 'n c h w -> n h w c')
+        res = get_similarity_metric(pred_images, gt_images, 'class', None, 
+                        n_way=100, num_trials=50, top_k=1, device='cuda')
+        res_part.append(np.mean(res))
+    res_list.append(np.mean(res_part))
+    metric_list.append('top-1-class-100-way')
+    res_part = []
+    for s in samples_to_run:
+        pred_images = [img[s] for img in samples]
+        pred_images = rearrange(np.stack(pred_images), 'n c h w -> n h w c')
+        res = get_similarity_metric(pred_images, gt_images, 'class', None, 
+                        n_way=50, num_trials=50, top_k=5, device='cuda')
+        res_part.append(np.mean(res))
+    res_list.append(np.mean(res_part))
+    metric_list.append('top-5-class-50-way')
+    res_part = []
+    for s in samples_to_run:
+        pred_images = [img[s] for img in samples]
+        pred_images = rearrange(np.stack(pred_images), 'n c h w -> n h w c')
+        res = get_similarity_metric(pred_images, gt_images, 'class', None, 
+                        n_way=100, num_trials=50, top_k=5, device='cuda')
+        res_part.append(np.mean(res))
+    res_list.append(np.mean(res_part))
+    metric_list.append('top-5-class-100-way')
     return res_list, metric_list
                
 def generate_images(generative_model, fmri_latents_dataset_train, fmri_latents_dataset_test, config):
-    grid, _ = generative_model.generate(fmri_latents_dataset_train, config.num_samples, 
+    grid, _, _ = generative_model.generate(fmri_latents_dataset_train, config.num_samples, 
                 config.ddim_steps, config.HW, 10) # generate 10 instances
     grid_imgs = Image.fromarray(grid.astype(np.uint8))
     grid_imgs.save(os.path.join(config.output_path, 'samples_train.png'))
     wandb.log({'summary/samples_train': wandb.Image(grid_imgs)})
 
-    grid, samples = generative_model.generate(fmri_latents_dataset_test, config.num_samples, 
+    grid, samples, _ = generative_model.generate(fmri_latents_dataset_test, config.num_samples, 
                 config.ddim_steps, config.HW)
     grid_imgs = Image.fromarray(grid.astype(np.uint8))
     grid_imgs.save(os.path.join(config.output_path,f'./samples_test.png'))
@@ -91,9 +154,12 @@ def generate_images(generative_model, fmri_latents_dataset_train, fmri_latents_d
     wandb.log({f'summary/samples_test': wandb.Image(grid_imgs)})
 
     metric, metric_list = get_eval_metric(samples, avg=config.eval_avg)
-    metric_dict = {f'summary/pair-wise_{k}':v for k, v in zip(metric_list[:-2], metric[:-2])}
+    metric_dict = {f'summary/pair-wise_{k}':v for k, v in zip(metric_list[:-5], metric[:-5])}
     metric_dict[f'summary/{metric_list[-2]}'] = metric[-2]
     metric_dict[f'summary/{metric_list[-1]}'] = metric[-1]
+    metric_dict[f'summary/{metric_list[-3]}'] = metric[-3]
+    metric_dict[f'summary/{metric_list[-4]}'] = metric[-4]
+    metric_dict[f'summary/{metric_list[-5]}'] = metric[-5]
     wandb.log(metric_dict)
 
 def normalize(img):
@@ -162,7 +228,7 @@ def main(config):
     pretrain_mbm_metafile = torch.load(config.pretrain_mbm_path, map_location='cpu')
 
     # Load pretrained LSTM model
-    lstm_model = LSTMforFMRI(input_dim=3396, hidden_size=1024, num_layers=1, bidirectional=False)
+    lstm_model = LSTMforFMRI(input_dim=3394, hidden_size=1024, num_layers=1, bidirectional=False)
     load_model(config, lstm_model, config.lstm_pretrain_path)
     lstm_model.eval()
     for p in lstm_model.parameters(): p.requires_grad = False
@@ -183,7 +249,7 @@ def main(config):
 
     # generate images
     # generate limited train images and generate images for subjects seperately
-    generate_images(generative_model, fmri_latents_dataset_train, fmri_latents_dataset_test, config)
+    generate_images(generative_model, train_ds, test_ds, config)
 
     return
 
@@ -233,7 +299,7 @@ def create_readme(config, path):
 
 def create_trainer(num_epoch, precision=32, accumulate_grad_batches=2,logger=None,check_val_every_n_epoch=0):
     acc = 'gpu' if torch.cuda.is_available() else 'cpu'
-    return pl.Trainer(accelerator=acc, max_epochs=num_epoch, logger=logger, 
+    return pl.Trainer(accelerator=acc, devices=1, strategy=None, max_epochs=num_epoch, logger=logger, 
             precision=precision, accumulate_grad_batches=accumulate_grad_batches,
             enable_checkpointing=False, enable_model_summary=False, gradient_clip_val=0.5,
             check_val_every_n_epoch=check_val_every_n_epoch)
@@ -251,7 +317,7 @@ if __name__ == '__main__':
         config.checkpoint_path = ckp
         print('Resuming from checkpoint: {}'.format(config.checkpoint_path))
 
-    output_path = os.path.join(config.root_path, 'results', 'generation',  '%s'%(datetime.datetime.now().strftime("%d-%m-%Y-%H-%M-%S")))
+    output_path = os.path.join(config.root_path, 'mind-vis-augmented', 'results', 'generation',  '%s'%(datetime.datetime.now().strftime("%d-%m-%Y-%H-%M-%S")))
     config.output_path = output_path
     os.makedirs(output_path, exist_ok=True)
     
@@ -261,3 +327,4 @@ if __name__ == '__main__':
     config.logger = logger
     main(config)
     wandb_finish()
+
